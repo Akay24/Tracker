@@ -92,7 +92,7 @@ export default function SDETracker() {
         minHeight: "100vh",
         background: C.bg,
         color: C.text,
-        fontFamily: "Syne,system-ui,-apple-system,Segoe UI,Roboto",
+        fontFamily: "sans-serif",
       }}
     >
       <style jsx global>
@@ -242,9 +242,9 @@ export default function SDETracker() {
                           fontFamily: "'JetBrains Mono',monospace",
                           opacity: authLoading || sending ? 0.55 : 1,
                         }}
-                        title="Sign in with GitHub (enable provider + redirect URL in Supabase)"
+                        title="Sign in with GitHub — enable provider in Supabase Dashboard"
                       >
-                        GitHub
+                        ⬡ GitHub
                       </button>
                     </>
                   )}

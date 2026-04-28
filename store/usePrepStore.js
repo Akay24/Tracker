@@ -3,7 +3,7 @@ import { createJSONStorage, persist } from "zustand/middleware";
 
 import { DSA_CATALOG } from "../data/dsaCatalog";
 import { DAY_SCHEDULE } from "../data/daySchedule";
-import { PROJECT_READINESS_FIELDS } from "../data/projectCatalog";
+import { PROJECT_READINESS_FIELDS, PROJECT_NOTES_FIELDS } from "../data/projectCatalog";
 import { SYSTEMS, SYSTEM_DESIGN_SECTIONS } from "../data/systemDesignCatalog";
 
 import { MISTAKE_TYPES } from "../utils/analytics";
@@ -12,7 +12,7 @@ import { newId } from "../utils/id";
 import { calcNextReviewDateKey, clampConfidence } from "../utils/spacedRepetition";
 
 const STORAGE_KEY = "sde_prep_engine";
-const STORAGE_VERSION = 1;
+const STORAGE_VERSION = 2;
 
 const noopStorage = {
   getItem: () => null,
@@ -67,14 +67,12 @@ const buildInitialSystemDesign = () => {
 const buildInitialProject = () => {
   const readiness = {};
   for (const f of PROJECT_READINESS_FIELDS) readiness[f.key] = 0;
+  const notes = {};
+  for (const f of PROJECT_NOTES_FIELDS) notes[f.key] = "";
   return {
     itemsChecked: {},
     readiness,
-    notes: {
-      latency_improvements: "",
-      scaling_readiness: "",
-      failure_scenarios: "",
-    },
+    notes,
   };
 };
 
@@ -107,39 +105,19 @@ const buildInitialState = () => ({
   },
 });
 
-const bumpActivity = (state, { dateKey, patch }) => {
-  const prev = state.activity.byDate[dateKey] || {
-    attempts: 0,
-    mistakes: 0,
-    mocks: 0,
-    behavioral: 0,
-  };
-  return {
-    ...state.activity,
-    byDate: {
-      ...state.activity.byDate,
-      [dateKey]: {
-        ...prev,
-        ...patch,
-      },
-    },
-  };
-};
-
 export const usePrepStore = create(
   persist(
     (set, get) => ({
       ...buildInitialState(),
 
       actions: {
-        // ── UI ───────────────────────────────────────────────────────────────
+        // ── UI ──────────────────────────────────────────────────────────────
         setActiveTab: (tab) =>
           set((state) => ({ ui: { ...state.ui, activeTab: tab } })),
         toggleInterviewMode: () =>
           set((state) => ({ ui: { ...state.ui, interviewMode: !state.ui.interviewMode } })),
         toggleDaySlider: () =>
           set((state) => ({ ui: { ...state.ui, showDaySlider: !state.ui.showDaySlider } })),
-
         setCurrentDay: (day) =>
           set(() => ({ currentDay: clampInt(day, 1, DAY_SCHEDULE.length) })),
 
@@ -148,68 +126,50 @@ export const usePrepStore = create(
           set((state) => ({
             weeklyEntries: {
               ...state.weeklyEntries,
-              [week]: {
-                ...(state.weeklyEntries[week] || {}),
-                [field]: value,
-              },
+              [week]: { ...(state.weeklyEntries[week] || {}), [field]: value },
             },
           })),
 
-        // ── Revision tracker ────────────────────────────────────────────────
+        // ── Revision ────────────────────────────────────────────────────────
         toggleRevisionChecked: (key) =>
           set((state) => ({
             revision: {
               ...state.revision,
-              checked: {
-                ...state.revision.checked,
-                [key]: !state.revision.checked[key],
-              },
+              checked: { ...state.revision.checked, [key]: !state.revision.checked[key] },
             },
           })),
         toggleRevisionExpanded: (key) =>
           set((state) => ({
             revision: {
               ...state.revision,
-              expanded: {
-                ...state.revision.expanded,
-                [key]: !state.revision.expanded[key],
-              },
+              expanded: { ...state.revision.expanded, [key]: !state.revision.expanded[key] },
             },
           })),
 
-        // ── Project tracker ─────────────────────────────────────────────────
+        // ── Project ─────────────────────────────────────────────────────────
         toggleProjectItem: (key) =>
           set((state) => ({
             project: {
               ...state.project,
-              itemsChecked: {
-                ...state.project.itemsChecked,
-                [key]: !state.project.itemsChecked[key],
-              },
+              itemsChecked: { ...state.project.itemsChecked, [key]: !state.project.itemsChecked[key] },
             },
           })),
         setProjectReadiness: (field, value) =>
           set((state) => ({
             project: {
               ...state.project,
-              readiness: {
-                ...state.project.readiness,
-                [field]: clampConfidence(value),
-              },
+              readiness: { ...state.project.readiness, [field]: clampConfidence(value) },
             },
           })),
         setProjectNote: (field, value) =>
           set((state) => ({
             project: {
               ...state.project,
-              notes: {
-                ...state.project.notes,
-                [field]: value,
-              },
+              notes: { ...state.project.notes, [field]: value },
             },
           })),
 
-        // ── DSA engine ──────────────────────────────────────────────────────
+        // ── DSA ─────────────────────────────────────────────────────────────
         setProblemConfidence: (problemId, confidence) =>
           set((state) => {
             const prev = state.dsa.problemsById[problemId];
@@ -219,10 +179,7 @@ export const usePrepStore = create(
                 ...state.dsa,
                 problemsById: {
                   ...state.dsa.problemsById,
-                  [problemId]: {
-                    ...prev,
-                    confidence: clampConfidence(confidence),
-                  },
+                  [problemId]: { ...prev, confidence: clampConfidence(confidence) },
                 },
               },
             };
@@ -237,24 +194,20 @@ export const usePrepStore = create(
             const nextConfidence = clampConfidence(
               confidence === undefined || confidence === null ? prev.confidence : confidence,
             );
-
             const normalizedMistakes = Array.from(
               new Set((mistakeTypes || []).filter((t) => MISTAKE_TYPES.includes(t))),
             );
-
             const mistakesToAdd = normalizedMistakes.map((t) => ({
               id: newId("mistake"),
               type: t,
               note,
               createdAt: new Date().toISOString(),
             }));
-
             const nextReviewDate = calcNextReviewDateKey({
               confidence: nextConfidence,
               mistakeCount: mistakesToAdd.length,
               fromDateKey: todayKey,
             });
-
             const updated = {
               ...prev,
               confidence: nextConfidence,
@@ -262,43 +215,24 @@ export const usePrepStore = create(
               mistakes: [...(prev.mistakes || []), ...mistakesToAdd],
               revisitSchedule: { nextReviewDate },
             };
-
-            const prevDay = state.activity.byDate[todayKey] || {
-              attempts: 0,
-              mistakes: 0,
-              mocks: 0,
-              behavioral: 0,
-            };
-
+            const prevDay = state.activity.byDate[todayKey] || { attempts: 0, mistakes: 0, mocks: 0, behavioral: 0 };
             return {
-              dsa: {
-                ...state.dsa,
-                problemsById: {
-                  ...state.dsa.problemsById,
-                  [problemId]: updated,
-                },
-              },
+              dsa: { ...state.dsa, problemsById: { ...state.dsa.problemsById, [problemId]: updated } },
               activity: {
                 ...state.activity,
                 byDate: {
                   ...state.activity.byDate,
-                  [todayKey]: {
-                    ...prevDay,
-                    attempts: (prevDay.attempts || 0) + 1,
-                    mistakes: (prevDay.mistakes || 0) + mistakesToAdd.length,
-                  },
+                  [todayKey]: { ...prevDay, attempts: (prevDay.attempts || 0) + 1, mistakes: (prevDay.mistakes || 0) + mistakesToAdd.length },
                 },
               },
             };
           }),
 
-        // ── System design ───────────────────────────────────────────────────
+        // ── System Design ────────────────────────────────────────────────────
         setSystemSectionConfidence: (systemId, sectionKey, confidence) =>
           set((state) => {
             const sys = state.systemDesign.systemsById[systemId];
             if (!sys) return state;
-            const prevSection = sys.sections?.[sectionKey];
-            if (!prevSection) return state;
             return {
               systemDesign: {
                 ...state.systemDesign,
@@ -308,10 +242,7 @@ export const usePrepStore = create(
                     ...sys,
                     sections: {
                       ...sys.sections,
-                      [sectionKey]: {
-                        ...prevSection,
-                        confidence: clampConfidence(confidence),
-                      },
+                      [sectionKey]: { ...(sys.sections?.[sectionKey] || {}), confidence: clampConfidence(confidence) },
                     },
                   },
                 },
@@ -322,8 +253,6 @@ export const usePrepStore = create(
           set((state) => {
             const sys = state.systemDesign.systemsById[systemId];
             if (!sys) return state;
-            const prevSection = sys.sections?.[sectionKey];
-            if (!prevSection) return state;
             return {
               systemDesign: {
                 ...state.systemDesign,
@@ -333,10 +262,7 @@ export const usePrepStore = create(
                     ...sys,
                     sections: {
                       ...sys.sections,
-                      [sectionKey]: {
-                        ...prevSection,
-                        notes,
-                      },
+                      [sectionKey]: { ...(sys.sections?.[sectionKey] || {}), notes },
                     },
                   },
                 },
@@ -344,66 +270,34 @@ export const usePrepStore = create(
             };
           }),
 
-        // ── Mock interviews ─────────────────────────────────────────────────
+        // ── Mock Interviews ───────────────────────────────────────────────────
         addMockSession: (session) =>
           set((state) => {
             const todayKey = toDateKey();
-            const prevDay = state.activity.byDate[todayKey] || {
-              attempts: 0,
-              mistakes: 0,
-              mocks: 0,
-              behavioral: 0,
-            };
+            const prevDay = state.activity.byDate[todayKey] || { attempts: 0, mistakes: 0, mocks: 0, behavioral: 0 };
             return {
-              mocks: {
-                ...state.mocks,
-                sessions: [session, ...state.mocks.sessions],
-              },
+              mocks: { ...state.mocks, sessions: [session, ...state.mocks.sessions] },
               activity: {
                 ...state.activity,
-                byDate: {
-                  ...state.activity.byDate,
-                  [todayKey]: {
-                    ...prevDay,
-                    mocks: (prevDay.mocks || 0) + 1,
-                  },
-                },
+                byDate: { ...state.activity.byDate, [todayKey]: { ...prevDay, mocks: (prevDay.mocks || 0) + 1 } },
               },
             };
           }),
-
         deleteMockSession: (sessionId) =>
           set((state) => ({
-            mocks: {
-              ...state.mocks,
-              sessions: state.mocks.sessions.filter((s) => s.id !== sessionId),
-            },
+            mocks: { ...state.mocks, sessions: state.mocks.sessions.filter((s) => s.id !== sessionId) },
           })),
 
-        // ── Behavioral ──────────────────────────────────────────────────────
+        // ── Behavioral ───────────────────────────────────────────────────────
         addBehavioralStory: (story) =>
           set((state) => {
             const todayKey = toDateKey();
-            const prevDay = state.activity.byDate[todayKey] || {
-              attempts: 0,
-              mistakes: 0,
-              mocks: 0,
-              behavioral: 0,
-            };
+            const prevDay = state.activity.byDate[todayKey] || { attempts: 0, mistakes: 0, mocks: 0, behavioral: 0 };
             return {
-              behavioral: {
-                ...state.behavioral,
-                stories: [story, ...state.behavioral.stories],
-              },
+              behavioral: { ...state.behavioral, stories: [story, ...state.behavioral.stories] },
               activity: {
                 ...state.activity,
-                byDate: {
-                  ...state.activity.byDate,
-                  [todayKey]: {
-                    ...prevDay,
-                    behavioral: (prevDay.behavioral || 0) + 1,
-                  },
-                },
+                byDate: { ...state.activity.byDate, [todayKey]: { ...prevDay, behavioral: (prevDay.behavioral || 0) + 1 } },
               },
             };
           }),
@@ -416,7 +310,6 @@ export const usePrepStore = create(
               ),
             },
           })),
-
         deleteBehavioralStory: (storyId) =>
           set((state) => ({
             behavioral: {
@@ -425,7 +318,7 @@ export const usePrepStore = create(
             },
           })),
 
-        // ── Import/Export ───────────────────────────────────────────────────
+        // ── Import/Export ─────────────────────────────────────────────────────
         resetAll: () => set(() => buildInitialState()),
         replacePersistedState: (nextState) =>
           set((state) => ({
@@ -440,61 +333,37 @@ export const usePrepStore = create(
       version: STORAGE_VERSION,
       storage,
       partialize: (state) => {
-        // Do not persist actions (functions)
-        // Also don't persist transient UI like expanded cards if we later add them.
         const { actions, ...rest } = state;
         return rest;
       },
       merge: (persistedState, currentState) => {
         const p = persistedState || {};
-
-        const merged = {
+        return {
           ...currentState,
           ...p,
           ui: { ...currentState.ui, ...(p.ui || {}) },
           dsa: {
             ...currentState.dsa,
             ...(p.dsa || {}),
-            problemsById: {
-              ...currentState.dsa.problemsById,
-              ...(p.dsa?.problemsById || {}),
-            },
+            problemsById: { ...currentState.dsa.problemsById, ...(p.dsa?.problemsById || {}) },
           },
           systemDesign: {
             ...currentState.systemDesign,
             ...(p.systemDesign || {}),
-            systemsById: {
-              ...currentState.systemDesign.systemsById,
-              ...(p.systemDesign?.systemsById || {}),
-            },
+            systemsById: { ...currentState.systemDesign.systemsById, ...(p.systemDesign?.systemsById || {}) },
           },
           project: {
             ...currentState.project,
             ...(p.project || {}),
-            itemsChecked: {
-              ...currentState.project.itemsChecked,
-              ...(p.project?.itemsChecked || {}),
-            },
-            readiness: {
-              ...currentState.project.readiness,
-              ...(p.project?.readiness || {}),
-            },
-            notes: {
-              ...currentState.project.notes,
-              ...(p.project?.notes || {}),
-            },
+            itemsChecked: { ...currentState.project.itemsChecked, ...(p.project?.itemsChecked || {}) },
+            readiness: { ...currentState.project.readiness, ...(p.project?.readiness || {}) },
+            notes: { ...currentState.project.notes, ...(p.project?.notes || {}) },
           },
           revision: {
             ...currentState.revision,
             ...(p.revision || {}),
-            checked: {
-              ...currentState.revision.checked,
-              ...(p.revision?.checked || {}),
-            },
-            expanded: {
-              ...currentState.revision.expanded,
-              ...(p.revision?.expanded || {}),
-            },
+            checked: { ...currentState.revision.checked, ...(p.revision?.checked || {}) },
+            expanded: { ...currentState.revision.expanded, ...(p.revision?.expanded || {}) },
           },
           mocks: {
             ...currentState.mocks,
@@ -504,26 +373,31 @@ export const usePrepStore = create(
           behavioral: {
             ...currentState.behavioral,
             ...(p.behavioral || {}),
-            stories: Array.isArray(p.behavioral?.stories)
-              ? p.behavioral.stories
-              : currentState.behavioral.stories,
+            stories: Array.isArray(p.behavioral?.stories) ? p.behavioral.stories : currentState.behavioral.stories,
           },
           activity: {
             ...currentState.activity,
             ...(p.activity || {}),
-            byDate: {
-              ...currentState.activity.byDate,
-              ...(p.activity?.byDate || {}),
-            },
+            byDate: { ...currentState.activity.byDate, ...(p.activity?.byDate || {}) },
           },
         };
-
-        return merged;
       },
       migrate: (persistedState, version) => {
         if (!persistedState) return buildInitialState();
-        // Placeholder for future migrations.
-        if (version === STORAGE_VERSION) return persistedState;
+        // v1 → v2: add new project notes fields
+        if (version < 2) {
+          const base = buildInitialState();
+          return {
+            ...base,
+            ...persistedState,
+            project: {
+              ...base.project,
+              ...(persistedState.project || {}),
+              notes: { ...base.project.notes, ...(persistedState.project?.notes || {}) },
+              readiness: { ...base.project.readiness, ...(persistedState.project?.readiness || {}) },
+            },
+          };
+        }
         return persistedState;
       },
     },
